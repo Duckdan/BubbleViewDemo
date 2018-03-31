@@ -1,6 +1,8 @@
 package study.com.bubbleviewdemo.view;
 
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
@@ -12,6 +14,7 @@ import android.graphics.Rect;
 import android.graphics.RectF;
 import android.text.TextUtils;
 import android.util.AttributeSet;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
@@ -22,16 +25,17 @@ import android.view.animation.OvershootInterpolator;
  */
 
 public class BubbleView extends View {
+
     //画笔--画圆
     private Paint paint;
     //画笔--字
     private Paint wordPaint;
     //固定圆的半径
-    private float fixationRadius = 30f;
+    private float fixationRadius = 20f;
     //固定圆的初始的半径
     private float originFixationRadius = fixationRadius;
     //动圆的半径
-    private float mobilizeRadius = 45f;
+    private float mobilizeRadius = 30f;
     //固定圆的外切圆
     private RectF fixationRectF;
     //动圆的外切圆
@@ -42,10 +46,12 @@ public class BubbleView extends View {
     private Context context;
     //状态栏高度
     private int statusBarHeight;
+    //屏幕宽度
+    private int widthPixels;
     //固定圆的最小半径
     private float minFixationRadius = 10f;
-    //两个圆的初始距离
-    private float originDistanceValue = 0;
+    //两个圆的最大距离
+    private float maxDistanceValue = 0;
     //时间距离和初始距离的百分比
     private float percent = 0;
     //当前事件是否是抬起事件
@@ -63,6 +69,35 @@ public class BubbleView extends View {
     private PointF eventPointF = new PointF();
     //事件发生的位置和定圆位置之间的距离
     private float distanceValue = 0;
+    private OnBubbleViewListener listener;
+
+    //动画监听
+    private ValueAnimator.AnimatorUpdateListener animatorUpdateListener = new ValueAnimator.AnimatorUpdateListener() {
+        @Override
+        public void onAnimationUpdate(ValueAnimator animation) {
+            //获取当前动画更新的值
+            float fraction = animation.getAnimatedFraction();
+            float currentValue = (float) animation.getAnimatedValue();
+            Log.e("point::", "两圆之间的比例：" + fraction + "=当前值：" + currentValue + "=总值：" + distanceValue);
+            PointF percentPointF = GeometryUtil.getPointByPercent(eventPointF, fixationPointF, fraction);
+            Log.e("point::", "动圆：" + percentPointF.x + "===" + percentPointF.y);
+            mobilizePointF.set(percentPointF.x, percentPointF.y);
+            invalidate();
+        }
+    };
+    //动画加速器
+    private OvershootInterpolator interpolator = new OvershootInterpolator(3);
+
+    private AnimatorListenerAdapter endListener = new AnimatorListenerAdapter() {
+        @Override
+        public void onAnimationEnd(Animator animation) {
+            super.onAnimationEnd(animation);
+            if (listener != null) {
+                //动画结束的时候重置View
+                listener.resetView();
+            }
+        }
+    };
 
 
     public BubbleView(Context context) {
@@ -99,6 +134,9 @@ public class BubbleView extends View {
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
+        DisplayMetrics displayMetrics = context.getResources().getDisplayMetrics();
+        widthPixels = displayMetrics.widthPixels;
+        maxDistanceValue = (float) (0.3 * widthPixels);
         statusBarHeight = getStatusBarHeight(this);
     }
 
@@ -107,23 +145,20 @@ public class BubbleView extends View {
         canvas.save();
         canvas.translate(0, -getStatusBarHeight(this));
 
-        //当初始距离为0时，对初始化距离的值赋值
-        if (originDistanceValue == 0) {
-            originDistanceValue = GeometryUtil.getDistanceBetween2Points(fixationPointF, mobilizePointF);
-        }
 
         //初始距离和事件距离之间的百分比
-        percent = originDistanceValue / distanceValue;
+        percent = distanceValue / maxDistanceValue;
 
-        if (percent <= 1) { //当事件距离大于初始距离时
-            fixationRadius = percent * originFixationRadius;
+        if (percent <= 1) { //当事件距离小于最大距离时
+            float tempRadius = (1 - percent) * originFixationRadius;
+            fixationRadius = tempRadius > minFixationRadius ? tempRadius : minFixationRadius;
         } else {
             fixationRadius = originFixationRadius;
         }
 
         //不是抬起事件
         if (!isActionUp) {
-            if (distanceValue <= 1.5 * originDistanceValue) {
+            if (distanceValue <= maxDistanceValue) {
                 canvas.drawCircle(fixationPointF.x, fixationPointF.y, fixationRadius, paint);
                 //获取控制点坐标
                 controlPointF = GeometryUtil.getMiddlePoint(fixationPointF, mobilizePointF);
@@ -177,26 +212,22 @@ public class BubbleView extends View {
                 eventPointF.set(actionRawX, actionRawY);
                 distanceValue = GeometryUtil.getDistanceBetween2Points(eventPointF, fixationPointF);
                 //当抬起事件发生时，两圆距离小于初始距离的1.5倍时isActionUp为false
-                isActionUp = distanceValue <= 1.5 * originDistanceValue ? false : true;
+                isActionUp = distanceValue <= maxDistanceValue ? false : true;
                 if (!isActionUp) {
 
                     ValueAnimator va = ValueAnimator.ofFloat(distanceValue, 0);
-                    va.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-                        @Override
-                        public void onAnimationUpdate(ValueAnimator animation) {
-                            //获取当前动画更新的值
-                            float fraction = animation.getAnimatedFraction();
-                            float currentValue = (float) animation.getAnimatedValue();
-                            Log.e("point::", "两圆之间的比例：" + fraction + "=当前值：" + currentValue + "=总值：" + distanceValue);
-                            PointF percentPointF = GeometryUtil.getPointByPercent(eventPointF, fixationPointF, fraction);
-                            Log.e("point::", "动圆：" + percentPointF.x + "===" + percentPointF.y);
-                            mobilizePointF.set(percentPointF.x, percentPointF.y);
-                            invalidate();
-                        }
-                    });
-                    va.setInterpolator(new OvershootInterpolator(5));
-                    va.setDuration(2000);
+
+                    va.addUpdateListener(animatorUpdateListener);
+
+                    va.addListener(endListener);
+                    va.setInterpolator(interpolator);
+                    va.setDuration(500);
                     va.start();
+                } else {
+                    //大于最大范围的时候清楚控件
+                    if (listener != null) {
+                        listener.clearView();
+                    }
                 }
                 invalidate();
                 break;
@@ -245,6 +276,21 @@ public class BubbleView extends View {
         Rect outRectF = new Rect();
         view.getWindowVisibleDisplayFrame(outRectF);
         return outRectF.top;
+    }
+
+    /**
+     * 设置气泡控件
+     *
+     * @param listener
+     */
+    public void setOnBubbleViewListener(OnBubbleViewListener listener) {
+        this.listener = listener;
+    }
+
+    public interface OnBubbleViewListener {
+        void clearView();
+
+        void resetView();
     }
 
 }
